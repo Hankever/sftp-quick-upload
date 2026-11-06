@@ -2,11 +2,12 @@
 <idea-plugin>
     <id>com.gqh.sftp-quick-upload</id>
     <name>Quick SFTP Upload</name>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <vendor>gqh</vendor>
 
     <description><![CDATA[
         <p>右键选中的文件或目录，直接上传到预先配置好的服务器，支持配置多台（测试、生产等）。</p>
+        <p>服务器配置按项目保存，不同项目的测试/生产服务器互不干扰；生产环境可开启二次确认。</p>
         <p>菜单结构：右键 → 上传到服务器 → 第一项「设置服务器信息…」，下面依次是各台服务器。</p>
         <p>只做手动上传，没有任何自动同步；密码保存在系统钥匙串中。</p>
     ]]></description>
@@ -16,7 +17,8 @@
     <idea-version since-build="233" until-build="253.*"/>
 
     <extensions defaultExtensionNs="com.intellij">
-        <applicationService serviceImplementation="com.gqh.sftpupload.ServersState"/>
+        <!-- 服务器配置按项目保存（项目根 .idea/sftpQuickUpload.xml），不同项目互不影响 -->
+        <projectService serviceImplementation="com.gqh.sftpupload.ServersState"/>
         <notificationGroup id="SftpQuickUpload" displayType="BALLOON"/>
     </extensions>
 

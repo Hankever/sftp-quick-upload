@@ -14,6 +14,8 @@ public class ServerConfig {
     private String username = "";
     private String localRoot = "src/main/webapp";
     private String remoteRoot = "";
+    /** 生产环境：菜单里带【生产】前缀，上传前会二次确认。 */
+    private boolean production = false;
 
     public String getId() {
         return id;
@@ -71,6 +73,14 @@ public class ServerConfig {
         this.remoteRoot = remoteRoot;
     }
 
+    public boolean isProduction() {
+        return production;
+    }
+
+    public void setProduction(boolean production) {
+        this.production = production;
+    }
+
     public ServerConfig copy() {
         ServerConfig c = new ServerConfig();
         c.id = id;
@@ -80,7 +90,26 @@ public class ServerConfig {
         c.username = username;
         c.localRoot = localRoot;
         c.remoteRoot = remoteRoot;
+        c.production = production;
         return c;
+    }
+
+    /** 对话框里「复制」用：内容一样，但换一个新 id。 */
+    public ServerConfig duplicate() {
+        ServerConfig c = copy();
+        c.id = UUID.randomUUID().toString();
+        c.name = getName() + " 副本";
+        return c;
+    }
+
+    /** 右键菜单里显示的名字，生产环境加前缀，避免点错。 */
+    public String menuText() {
+        return production ? "【生产】" + getName() : getName();
+    }
+
+    /** 配置窗口左侧列表的显示文本。 */
+    public String listText() {
+        return menuText() + "   (" + getHost() + ")";
     }
 
     public String displayText() {

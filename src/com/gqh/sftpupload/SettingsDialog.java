@@ -12,8 +12,10 @@ import com.intellij.util.ui.FormBuilder;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.BoxLayout;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -24,7 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 服务器管理窗口：左边列表，右边表单。
+ * 服务器管理窗口：左边列表，右边表单。配置只作用于当前项目。
  */
 public class SettingsDialog extends DialogWrapper {
 
@@ -39,6 +41,11 @@ public class SettingsDialog extends DialogWrapper {
     private final JBTextField userField = new JBTextField();
     private final JBTextField localRootField = new JBTextField();
     private final JBTextField remoteRootField = new JBTextField();
+    private final JCheckBox productionBox = new JCheckBox("生产环境（上传前二次确认）");
+
+    private JBLabel legacyLabel;
+    private JButton legacyImportButton;
+    private JButton legacyClearButton;
 
     private int currentIndex = -1;
     private boolean loading;
@@ -46,11 +53,12 @@ public class SettingsDialog extends DialogWrapper {
     public SettingsDialog(@Nullable Project project) {
         super(project, true);
         this.project = project;
-        setTitle("上传服务器配置");
+        String projectName = project == null ? "当前项目" : project.getName();
+        setTitle("上传服务器配置 — " + projectName);
         setOKButtonText("保存");
         setCancelButtonText("取消");
 
-        for (ServerConfig s : ServersState.getInstance().getServers()) {
+        for (ServerConfig s : ServersState.serversOf(project)) {
             servers.add(s.copy());
         }
         rebuildList();
@@ -63,7 +71,7 @@ public class SettingsDialog extends DialogWrapper {
     private void rebuildList() {
         listModel.clear();
         for (ServerConfig s : servers) {
-            listModel.addElement(s.getName() + "   (" + s.getHost() + ")");
+            listModel.addElement(s.listText());
         }
     }
 
@@ -84,25 +92,19 @@ public class SettingsDialog extends DialogWrapper {
         });
 
         JBScrollPane scroll = new JBScrollPane(list);
-        scroll.setPreferredSize(new Dimension(200, 240));
+        scroll.setPreferredSize(new Dimension(340, 200));
 
         JPanel left = new JPanel(new BorderLayout(0, 6));
-        left.add(new JBLabel("已配置的服务器"), BorderLayout.NORTH);
+        left.add(new JBLabel("本项目的服务器"), BorderLayout.NORTH);
         left.add(scroll, BorderLayout.CENTER);
 
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-        JButton add = new JButton("新增");
-        add.addActionListener(e -> addServer());
-        JButton remove = new JButton("删除");
-        remove.addActionListener(e -> removeServer());
-        JButton test = new JButton("测试连接");
-        test.addActionListener(e -> testConnection());
-        JButton clearPwd = new JButton("清除密码");
-        clearPwd.addActionListener(e -> clearPassword());
-        buttons.add(add);
-        buttons.add(remove);
-        buttons.add(test);
-        buttons.add(clearPwd);
+        JPanel buttons = new JPanel();
+        buttons.setLayout(new BoxLayout(buttons, BoxLayout.Y_AXIS));
+        buttons.add(buttonRow(newButton("新增", this::addServer),
+                newButton("复制", this::duplicateServer),
+                newButton("删除", this::removeServer)));
+        buttons.add(buttonRow(newButton("测试连接", this::testConnection),
+                newButton("清除密码", this::clearPassword)));
         left.add(buttons, BorderLayout.SOUTH);
 
         portField.setColumns(6);
@@ -118,14 +120,119 @@ public class SettingsDialog extends DialogWrapper {
                 .addLabeledComponent("端口 / 用户：", portRow)
                 .addLabeledComponent("本地目录：", localRootField)
                 .addLabeledComponent("远端目录：", remoteRootField)
+                .addComponent(productionBox)
                 .addComponent(new JBLabel("<html><i>本地目录相对项目根，例如 src/main/webapp；"
                         + "远端目录填绝对路径，例如 /var/www/app</i></html>"))
+                .addComponent(new JBLabel("<html><i>这些配置只对当前项目生效，保存在项目的 .idea 目录，"
+                        + "不会和其他项目共用。</i></html>"))
                 .getPanel();
 
-        JPanel root = new JPanel(new BorderLayout(14, 0));
-        root.add(left, BorderLayout.WEST);
-        root.add(right, BorderLayout.CENTER);
+        JPanel root = new JPanel(new BorderLayout(0, 10));
+        JComponent banner = createLegacyBanner();
+        if (banner != null) {
+            root.add(banner, BorderLayout.NORTH);
+        }
+        JPanel body = new JPanel(new BorderLayout(14, 0));
+        body.add(left, BorderLayout.WEST);
+        body.add(right, BorderLayout.CENTER);
+        root.add(body, BorderLayout.CENTER);
         return root;
+    }
+
+    /** 旧版是全局配置，这里给一个显式入口把它搬到当前项目，不做静默迁移免得搬错项目。 */
+    private @Nullable JComponent createLegacyBanner() {
+        if (LegacyConfig.isEmpty()) {
+            return null;
+        }
+        legacyLabel = new JBLabel();
+        legacyImportButton = newButton("导入到本项目", this::importLegacy);
+        legacyClearButton = newButton("清除旧配置", this::clearLegacy);
+        updateLegacyBanner();
+
+        JPanel banner = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        banner.add(legacyLabel);
+        banner.add(legacyImportButton);
+        banner.add(legacyClearButton);
+        return banner;
+    }
+
+    private void updateLegacyBanner() {
+        if (legacyLabel == null) {
+            return;
+        }
+        int count = LegacyConfig.size();
+        legacyLabel.setText("<html>检测到旧版全局配置（" + count + " 台服务器，以前所有项目共用）</html>");
+        boolean has = count > 0;
+        if (legacyImportButton != null) {
+            legacyImportButton.setEnabled(has);
+        }
+        if (legacyClearButton != null) {
+            legacyClearButton.setEnabled(has);
+        }
+    }
+
+    private void importLegacy() {
+        flushForm();
+        List<ServerConfig> pool = new ArrayList<>(servers);
+        List<ServerConfig> toAdd = new ArrayList<>();
+        for (ServerConfig legacyConfig : LegacyConfig.servers()) {
+            boolean exists = pool.stream().anyMatch(c -> ServersState.sameTarget(c, legacyConfig));
+            if (!exists) {
+                ServerConfig copy = legacyConfig.copy();
+                toAdd.add(copy);
+                pool.add(copy);
+            }
+        }
+        if (toAdd.isEmpty()) {
+            Messages.showInfoMessage(project, "旧版配置里的服务器本项目都已经有了", "无需导入");
+            return;
+        }
+        servers.addAll(toAdd);
+        currentIndex = -1;
+        rebuildList();
+        list.setSelectedIndex(servers.size() - toAdd.size());
+        if (legacyLabel != null) {
+            legacyLabel.setText("<html>已导入 " + toAdd.size() + " 台服务器，<b>记得点「保存」生效</b>。"
+                    + "旧配置仍保留，其他项目也可以导入。</html>");
+        }
+    }
+
+    private void clearLegacy() {
+        int answer = Messages.showYesNoDialog(project,
+                "清除后，其他项目就再也无法从旧版全局配置导入了。\n确定所有项目都配置好了吗？",
+                "清除旧版全局配置", Messages.getWarningIcon());
+        if (answer != Messages.YES) {
+            return;
+        }
+        LegacyConfig.clear();
+        if (legacyLabel != null) {
+            legacyLabel.setText("<html>旧版全局配置已清除</html>");
+            updateButtonsEnabled();
+        }
+    }
+
+    private void updateButtonsEnabled() {
+        boolean has = !LegacyConfig.isEmpty();
+        if (legacyImportButton != null) {
+            legacyImportButton.setEnabled(has);
+        }
+        if (legacyClearButton != null) {
+            legacyClearButton.setEnabled(has);
+        }
+    }
+
+    private static JButton newButton(String text, Runnable action) {
+        JButton b = new JButton(text);
+        b.addActionListener(e -> action.run());
+        return b;
+    }
+
+    private static JPanel buttonRow(JButton... items) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+        for (JButton b : items) {
+            row.add(b);
+        }
+        return row;
     }
 
     private void addServer() {
@@ -138,9 +245,28 @@ public class SettingsDialog extends DialogWrapper {
         nameField.requestFocusInWindow();
     }
 
+    private void duplicateServer() {
+        flushForm();
+        if (currentIndex < 0 || currentIndex >= servers.size()) {
+            return;
+        }
+        int idx = currentIndex;
+        servers.add(idx + 1, servers.get(idx).duplicate());
+        // 重建列表会先触发一次「取消选中」，把 currentIndex 清掉，所以先记下目标位置
+        currentIndex = -1;
+        rebuildList();
+        list.setSelectedIndex(idx + 1);
+    }
+
     private void removeServer() {
         int idx = list.getSelectedIndex();
         if (idx < 0) {
+            return;
+        }
+        int answer = Messages.showYesNoDialog(project,
+                "确定删除服务器「" + servers.get(idx).getName() + "」吗？\n（如果它只是本项目的临时配置，删除不影响其他项目）",
+                "删除服务器", Messages.getQuestionIcon());
+        if (answer != Messages.YES) {
             return;
         }
         ServerConfig removed = servers.remove(idx);
@@ -174,7 +300,7 @@ public class SettingsDialog extends DialogWrapper {
             return;
         }
         String pwd = PasswordUtil.get(cfg);
-        if (pwd == null || pwd.isEmpty()) {
+        if (pwd == null) {
             PasswordDialog dialog = new PasswordDialog(project, cfg);
             if (!dialog.showAndGet()) {
                 return;
@@ -216,6 +342,7 @@ public class SettingsDialog extends DialogWrapper {
             userField.setText(s.getUsername());
             localRootField.setText(s.getLocalRoot());
             remoteRootField.setText(s.getRemoteRoot());
+            productionBox.setSelected(s.isProduction());
         } finally {
             loading = false;
         }
@@ -230,6 +357,7 @@ public class SettingsDialog extends DialogWrapper {
             userField.setText("");
             localRootField.setText("src/main/webapp");
             remoteRootField.setText("");
+            productionBox.setSelected(false);
         } finally {
             loading = false;
         }
@@ -250,8 +378,9 @@ public class SettingsDialog extends DialogWrapper {
         s.setUsername(userField.getText().trim());
         s.setLocalRoot(localRootField.getText().trim());
         s.setRemoteRoot(remoteRootField.getText().trim());
+        s.setProduction(productionBox.isSelected());
         if (currentIndex < listModel.size()) {
-            listModel.set(currentIndex, s.getName() + "   (" + s.getHost() + ")");
+            listModel.set(currentIndex, s.listText());
         }
     }
 
@@ -259,6 +388,10 @@ public class SettingsDialog extends DialogWrapper {
     protected void doOKAction() {
         flushForm();
         for (ServerConfig s : servers) {
+            if (s.getName().isEmpty()) {
+                setErrorText("服务器名称不能为空");
+                return;
+            }
             if (s.getHost().isEmpty() || s.getUsername().isEmpty() || s.getRemoteRoot().isEmpty()) {
                 setErrorText("「" + s.getName() + "」的主机、用户名、远端目录都不能为空");
                 return;
@@ -272,7 +405,11 @@ public class SettingsDialog extends DialogWrapper {
     }
 
     public void save() {
-        List<ServerConfig> target = ServersState.getInstance().getServers();
+        ServersState service = ServersState.getInstance(project);
+        if (service == null) {
+            return;
+        }
+        List<ServerConfig> target = service.getServers();
         target.clear();
         for (ServerConfig s : servers) {
             target.add(s.copy());

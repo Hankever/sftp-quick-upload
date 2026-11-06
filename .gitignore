@@ -8,3 +8,4 @@ out/
 # IDEA
 .idea/
 *.iml
+/.workbuddy/

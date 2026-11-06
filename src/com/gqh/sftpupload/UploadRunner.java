@@ -66,7 +66,7 @@ final class UploadRunner {
             return;
         }
 
-        new Task.Backgroundable(project, "上传到 " + cfg.getName(), true) {
+        new Task.Backgroundable(project, "上传到 " + cfg.menuText(), true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setIndeterminate(false);
@@ -97,7 +97,7 @@ final class UploadRunner {
                     }
                     indicator.setFraction(1.0);
 
-                    String msg = "已上传 " + done + " 个文件到 " + cfg.getName()
+                    String msg = "已上传 " + done + " 个文件到 " + cfg.menuText()
                             + "\n" + cfg.getUsername() + "@" + cfg.getHost() + ":" + remoteRoot;
                     if (!skipped.isEmpty()) {
                         msg += "\n\n跳过 " + skipped.size() + " 个不在 " + cfg.getLocalRoot() + " 下的文件：\n"

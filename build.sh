@@ -14,6 +14,8 @@ fi
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 OUT="$ROOT/build"
 DIST="$OUT/dist/sftp-quick-upload"
+VERSION="$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' "$ROOT/src/META-INF/plugin.xml" | head -1)"
+ZIP="$OUT/sftp-quick-upload-$VERSION.zip"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/classes" "$DIST/lib"
@@ -32,7 +34,7 @@ cp -R "$ROOT/src/META-INF" "$OUT/classes/"
 cp "$ROOT"/lib/*.jar "$DIST/lib/"
 
 cd "$OUT/dist"
-zip -qr "$OUT/sftp-quick-upload-1.0.0.zip" sftp-quick-upload
+zip -qr "$ZIP" sftp-quick-upload
 
-echo "打包完成: $OUT/sftp-quick-upload-1.0.0.zip"
-ls -lh "$OUT/sftp-quick-upload-1.0.0.zip"
+echo "打包完成: $ZIP"
+ls -lh "$ZIP"
