@@ -2,7 +2,7 @@
 <idea-plugin>
     <id>com.gqh.sftp-quick-upload</id>
     <name>Quick SFTP Upload</name>
-    <version>1.2.1</version>
+    <version>1.3.0</version>
     <vendor>gqh</vendor>
 
     <description><![CDATA[
@@ -15,7 +15,7 @@
 
     <depends>com.intellij.modules.platform</depends>
 
-    <idea-version since-build="233" until-build="253.*"/>
+    <idea-version since-build="211" until-build="253.*"/>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- 服务器配置按项目保存（项目根 .idea/sftpQuickUpload.xml），不同项目互不影响 -->

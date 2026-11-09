@@ -33,7 +33,7 @@ IntelliJ IDEA 插件：右键把选中的文件或目录上传到预先配置好
 ## 安装
 
 1. `Settings → Plugins → ⚙️ → Install Plugin from Disk…`
-2. 选择 `build/sftp-quick-upload-1.2.1.zip`
+2. 选择 `build/sftp-quick-upload-1.3.0.zip`（或 Releases 里的同名 zip）
 3. 重启 IDE
 
 ## 配置
@@ -83,14 +83,24 @@ IntelliJ IDEA 插件：右键把选中的文件或目录上传到预先配置好
 
 ## 构建
 
-需要本机装有 IntelliJ IDEA（用它的 JBR 21 做编译），无需 Gradle、无需联网下载依赖。
-
 ```bash
 bash build.sh
+# 首次会下载 ~800M 的 IDEA 2021.1 平台包到 .idea-dist/，之后复用
 # 产物：build/sftp-quick-upload-<plugin.xml 里的版本号>.zip
 ```
 
-`build.sh` 默认用 `/Applications/IntelliJ IDEA.app/Contents` 里的平台 jar；也可以用 `IDEA_HOME` 指定（CI 里指向解压出来的 `idea-IC-*` 目录，javac 则用 JDK 21）。
+不需要 Gradle。编译用的是 **IDEA 2021.1 的平台 jar + `--release 11`**，这是"兼容新老 IDEA"的核心：
+
+- 对着 2021.1 编译，凡是 2022+ 才加的 API 都编不过，天然避免 `NoSuchMethodError`
+- 字节码 11（class file 55），2021.1 的 JBR 11 能加载；新版 IDEA 也能加载
+
+可调参数：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `IDEA_VERSION` | `2021.1` | 用哪个版本的平台 jar 编译；`local` 表示用本机安装的 IDEA（产物不保证兼容旧版） |
+| `RELEASE_LEVEL` | `11` | 字节码版本，跟 `IDEA_VERSION` 配套 |
+| `IDEA_HOME` | 空 | 直接指定平台目录（里面要有 `lib/*.jar`），CI 用这个 |
 
 依赖 `lib/` 下的 Apache MINA SSHD（已随仓库提交）：
 
@@ -103,7 +113,7 @@ bash build.sh
 改好 `src/META-INF/plugin.xml` 的 `<version>`，打 tag 推上去，GitHub Actions 会自动编译并把 zip 传到 Releases：
 
 ```bash
-git tag -a v1.2.1 -m "1.2.1"
+git tag -a v1.3.0 -m "1.3.0"
 git push origin main --follow-tags
 ```
 
@@ -111,8 +121,8 @@ git push origin main --follow-tags
 
 - 触发：push 形如 `v*` 的 tag；也可以在 Actions 页面手动 Run workflow 并填 tag
 - 校验 tag 与 `plugin.xml` 的版本号一致，不一致直接失败，避免发错包
-- 下载对应版本的 `ideaIC` 平台 jar（缓存在 `.idea-dist`，只有第一次跑要下 1.2G）
-- 跑 `build.sh`，把 `build/sftp-quick-upload-<版本>.zip` 作为 Release 附件上传
+- `scripts/fetch-idea.sh` 下载 2021.1 平台 jar（缓存在 `.idea-dist`，只有第一次要下 800M）
+- JDK 11 跑 `build.sh`，把 `build/sftp-quick-upload-<版本>.zip` 作为 Release 附件上传
 
 ## 目录结构
 
@@ -139,9 +149,23 @@ build.sh                           编译打包脚本
 
 ## 兼容性
 
-- 编译目标：Java 21（IDEA 2024.1+ 运行时）
-- `since-build 233`，`until-build 253.*`
-- 与 IDE 版本强绑定的是 `plugin.xml` 里的 `idea-version`，升级 IDEA 后如提示不兼容，改这一行重新打包即可
+| 项 | 值 |
+|---|---|
+| `since-build` | `211`（IDEA 2021.1） |
+| `until-build` | `253.*`（2025.3） |
+| 字节码 | Java 11（class file 55） |
+| 编译平台 | IDEA 2021.1 平台 jar |
+
+**加新功能时的约束**：只能用 2021.1 存在的平台 API。开发时 `bash build.sh` 默认就对着老平台编译，编不过通常就是用了新 API（比如 `ActionUpdateThread`、`createNotification(title, content, type)` 这类 2022+ 的东西）。真要用新 API，得在 `plugin.xml` 里抬高 `since-build`，或者拆成两份产物。
+
+想快速确认"没用到任何一端缺失的 API"，可以两端各编一次，两边都过就说明用到的 API 在新旧 IDE 里都存在：
+
+```bash
+bash build.sh                                                      # 对 2021.1（正式产物）
+IDEA_HOME="/Applications/IntelliJ IDEA.app/Contents" bash build.sh  # 对本机新版
+```
+
+发布前建议在**真实的 2021.1 上跑一遍**：编译只能保证方法和类存在，UI 行为、通知、服务加载这些运行时差异只有实测才看得出来。
 
 ## 说明
 

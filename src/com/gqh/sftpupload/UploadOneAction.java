@@ -1,6 +1,5 @@
 package com.gqh.sftpupload;
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
@@ -65,8 +64,4 @@ public class UploadOneAction extends AnAction {
         e.getPresentation().setEnabled(files != null && files.length > 0);
     }
 
-    @Override
-    public @NotNull ActionUpdateThread getActionUpdateThread() {
-        return ActionUpdateThread.BGT;
-    }
 }

@@ -1,7 +1,6 @@
 package com.gqh.sftpupload;
 
 import com.intellij.notification.NotificationType;
-import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.project.Project;
@@ -46,8 +45,4 @@ public class SettingsAction extends AnAction {
         }
     }
 
-    @Override
-    public @NotNull ActionUpdateThread getActionUpdateThread() {
-        return ActionUpdateThread.BGT;
-    }
 }

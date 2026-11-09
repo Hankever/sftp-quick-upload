@@ -182,9 +182,11 @@ final class UploadRunner {
     }
 
     static void showNotification(Project project, String title, String content, NotificationType type) {
+        // createNotification(title, content, type) 是 2021.2+ 才有的重载，这里用老 API + setTitle
         NotificationGroupManager.getInstance()
                 .getNotificationGroup("SftpQuickUpload")
-                .createNotification(title, content, type)
+                .createNotification(content, type)
+                .setTitle(title)
                 .notify(project);
     }
 

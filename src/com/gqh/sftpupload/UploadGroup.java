@@ -1,7 +1,6 @@
 package com.gqh.sftpupload;
 
 import com.intellij.openapi.actionSystem.ActionGroup;
-import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
@@ -24,7 +23,7 @@ public class UploadGroup extends ActionGroup {
     }
 
     @Override
-    public AnAction @NotNull [] getChildren(@Nullable AnActionEvent e) {
+    public @NotNull AnAction[] getChildren(@Nullable AnActionEvent e) {
         Project project = e == null ? null : e.getProject();
         List<AnAction> items = new ArrayList<>();
         items.add(new SettingsAction());
@@ -45,11 +44,6 @@ public class UploadGroup extends ActionGroup {
                 public void actionPerformed(@NotNull AnActionEvent event) {
                     SettingsAction.openSettings(event.getProject(), true);
                 }
-
-                @Override
-                public @NotNull ActionUpdateThread getActionUpdateThread() {
-                    return ActionUpdateThread.BGT;
-                }
             });
         }
         items.add(new AnAction("当前项目还没有配置服务器", "点上面「设置服务器信息」添加", null) {
@@ -61,11 +55,6 @@ public class UploadGroup extends ActionGroup {
             @Override
             public void update(@NotNull AnActionEvent event) {
                 event.getPresentation().setEnabled(false);
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
             }
         });
         return items.toArray(AnAction.EMPTY_ARRAY);
@@ -88,8 +77,4 @@ public class UploadGroup extends ActionGroup {
         e.getPresentation().setEnabledAndVisible(e.getProject() != null);
     }
 
-    @Override
-    public @NotNull ActionUpdateThread getActionUpdateThread() {
-        return ActionUpdateThread.BGT;
-    }
 }
