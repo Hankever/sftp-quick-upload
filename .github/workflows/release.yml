@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 tag（例如 v1.2.1，需已存在）"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # 编译用的 IDEA 平台版本，对应 plugin.xml 里的 until-build(253.*)
+  IDEA_VERSION: "2025.2"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: 校验 tag 与 plugin.xml 版本一致
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' src/META-INF/plugin.xml | head -1)"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "tag=$TAG, version=$VERSION"
+          if [ "$TAG" != "v$VERSION" ] && [ "$TAG" != "$VERSION" ]; then
+            echo "::error::tag $TAG 与 plugin.xml 里的版本 $VERSION 不一致，先改版本号再打 tag"
+            exit 1
+          fi
+
+      - name: 缓存 IDEA 平台 jar
+        uses: actions/cache@v4
+        with:
+          path: .idea-dist
+          key: idea-lib-${{ env.IDEA_VERSION }}
+
+      - name: 下载 IDEA 平台 jar（编译依赖）
+        run: |
+          if [ -d .idea-dist/lib ] && [ -n "$(ls -A .idea-dist/lib)" ]; then
+            echo "命中缓存，跳过下载"
+          else
+            echo "下载 ideaIC-$IDEA_VERSION ..."
+            curl -fsSL --retry 3 -o idea.tar.gz \
+              "https://download.jetbrains.com/idea/ideaIC-${IDEA_VERSION}.tar.gz"
+            # 只保留平台 jar：javac/jar 用 setup-java 的 JDK，不需要 jbr 和 plugins
+            mkdir -p .idea-tmp .idea-dist
+            tar -xzf idea.tar.gz -C .idea-tmp
+            mv .idea-tmp/*/lib .idea-dist/lib
+            rm -rf .idea-tmp idea.tar.gz
+          fi
+          echo "platform jars: $(ls .idea-dist/lib/*.jar | wc -l | tr -d ' ')"
+
+      - name: 编译打包
+        env:
+          IDEA_HOME: ${{ github.workspace }}/.idea-dist
+        run: |
+          bash build.sh
+          ls -lh "build/sftp-quick-upload-${VERSION}.zip"
+
+      - name: 发布到 GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ZIP="build/sftp-quick-upload-${VERSION}.zip"
+          NOTES=$(cat <<'EOF'
+          安装：Settings → Plugins → Install Plugin from Disk… 选择下面的 zip，重启 IDE。
+
+          - 服务器配置按项目隔离，存在项目的 .idea/sftpQuickUpload.xml
+          - 一台服务器可配多条路径映射，多选混着网页/资源文件会按路径自动分发到各自远端目录
+          - 1.1.0 及更早的单条映射会自动迁移为「网页」映射，密码沿用钥匙串里的记录
+          EOF
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG 已存在，只更新附件"
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" "$ZIP" \
+              --title "Quick SFTP Upload $VERSION" \
+              --notes "$NOTES"
+          fi

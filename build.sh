@@ -1,14 +1,44 @@
 #!/bin/bash
 set -e
 
-IDEA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home"
-JAVAC="$IDEA_HOME/bin/javac"
-IDEA_LIB="/Applications/IntelliJ IDEA.app/Contents/lib"
+# IDEA 平台 jar 所在目录：本地默认用 macOS 安装路径，CI 用 IDEA_HOME 指向解压出来的发行版
+IDEA_HOME="${IDEA_HOME:-/Applications/IntelliJ IDEA.app/Contents}"
+IDEA_LIB="$IDEA_HOME/lib"
 
-# JBR 里没有 jar 工具，用系统 JDK 的；找不到就直接用 zip
-JAR="$IDEA_HOME/bin/jar"
-if [ ! -x "$JAR" ]; then
-  JAR="$(/usr/libexec/java_home -v 17 2>/dev/null)/bin/jar"
+if [ ! -d "$IDEA_LIB" ]; then
+  echo "找不到 IDEA 平台 jar 目录：$IDEA_LIB" >&2
+  echo "可以用 IDEA_HOME 指定（里面要有 lib/*.jar），例如 CI 里解压出来的 idea-IC-*" >&2
+  exit 1
+fi
+
+if ! command -v zip >/dev/null 2>&1; then
+  echo "找不到 zip 命令" >&2
+  exit 1
+fi
+
+# javac：优先 IDE 自带的 JBR，其次 PATH / 系统 JDK，但必须 >= 21
+pick_javac() {
+  for c in \
+    "$IDEA_HOME/jbr/Contents/Home/bin/javac" \
+    "$IDEA_HOME/jbr/bin/javac" \
+    "$(command -v javac 2>/dev/null || true)" \
+    "$(/usr/libexec/java_home -v 21 2>/dev/null || true)/bin/javac" \
+    "$(/usr/libexec/java_home -v 17 2>/dev/null || true)/bin/javac"; do
+    [ -n "$c" ] && [ -x "$c" ] || continue
+    local major
+    major="$("$c" -version 2>&1 | sed -n 's/^javac \([0-9]\{1,\}\).*/\1/p')"
+    if [ -n "$major" ] && [ "$major" -ge 21 ]; then
+      echo "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+JAVAC="$(pick_javac || true)"
+if [ -z "$JAVAC" ]; then
+  echo "找不到 JDK 21+ 的 javac（本地装 IDEA 即可，CI 用 setup-java）" >&2
+  exit 1
 fi
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -30,7 +60,8 @@ echo "编译 $(wc -l < "$OUT/sources.txt" | tr -d ' ') 个源文件..."
 
 cp -R "$ROOT/src/META-INF" "$OUT/classes/"
 
-"$JAR" --create --file "$DIST/lib/sftp-quick-upload.jar" -C "$OUT/classes" .
+# jar 就是个 zip，用 zip 打可以避开本机 JDK 版本的坑
+(cd "$OUT/classes" && zip -qr "$DIST/lib/sftp-quick-upload.jar" .)
 cp "$ROOT"/lib/*.jar "$DIST/lib/"
 
 cd "$OUT/dist"

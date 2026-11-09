@@ -90,11 +90,29 @@ bash build.sh
 # 产物：build/sftp-quick-upload-<plugin.xml 里的版本号>.zip
 ```
 
+`build.sh` 默认用 `/Applications/IntelliJ IDEA.app/Contents` 里的平台 jar；也可以用 `IDEA_HOME` 指定（CI 里指向解压出来的 `idea-IC-*` 目录，javac 则用 JDK 21）。
+
 依赖 `lib/` 下的 Apache MINA SSHD（已随仓库提交）：
 
 - `sshd-core-2.13.2.jar`
 - `sshd-common-2.13.2.jar`
 - `sshd-sftp-2.13.2.jar`
+
+## 发版
+
+改好 `src/META-INF/plugin.xml` 的 `<version>`，打 tag 推上去，GitHub Actions 会自动编译并把 zip 传到 Releases：
+
+```bash
+git tag -a v1.2.1 -m "1.2.1"
+git push origin main --follow-tags
+```
+
+`.github/workflows/release.yml` 做的事：
+
+- 触发：push 形如 `v*` 的 tag；也可以在 Actions 页面手动 Run workflow 并填 tag
+- 校验 tag 与 `plugin.xml` 的版本号一致，不一致直接失败，避免发错包
+- 下载对应版本的 `ideaIC` 平台 jar（缓存在 `.idea-dist`，只有第一次跑要下 1.2G）
+- 跑 `build.sh`，把 `build/sftp-quick-upload-<版本>.zip` 作为 Release 附件上传
 
 ## 目录结构
 
