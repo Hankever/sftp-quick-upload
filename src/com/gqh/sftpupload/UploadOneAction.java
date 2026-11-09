@@ -2,7 +2,6 @@ package com.gqh.sftpupload;
 
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -34,7 +33,7 @@ public class UploadOneAction extends AnAction {
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
         Project project = e.getProject();
-        VirtualFile[] files = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY);
+        VirtualFile[] files = SelectedFiles.of(e);
         if (project == null || files == null || files.length == 0) {
             return;
         }
@@ -60,7 +59,7 @@ public class UploadOneAction extends AnAction {
 
     @Override
     public void update(@NotNull AnActionEvent e) {
-        VirtualFile[] files = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY);
+        VirtualFile[] files = SelectedFiles.of(e);
         e.getPresentation().setEnabled(files != null && files.length > 0);
     }
 

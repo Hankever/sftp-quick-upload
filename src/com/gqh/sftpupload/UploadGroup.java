@@ -3,7 +3,6 @@ package com.gqh.sftpupload;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.Separator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -31,7 +30,7 @@ public class UploadGroup extends ActionGroup {
 
         List<ServerConfig> servers = ServersState.serversOf(project);
         if (!servers.isEmpty()) {
-            VirtualFile[] selected = e == null ? null : e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY);
+            VirtualFile[] selected = SelectedFiles.of(e);
             for (ServerConfig server : servers) {
                 items.add(new UploadOneAction(server, previewOf(project, server, selected)));
             }
