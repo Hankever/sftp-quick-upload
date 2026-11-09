@@ -66,7 +66,15 @@ public class ServersState implements PersistentStateComponent<ServersState.State
         return a.getHost().equals(b.getHost())
                 && a.getPort() == b.getPort()
                 && a.getUsername().equals(b.getUsername())
-                && a.getRemoteRoot().equals(b.getRemoteRoot());
+                && mappingsKey(a).equals(mappingsKey(b));
+    }
+
+    private static String mappingsKey(ServerConfig cfg) {
+        StringBuilder sb = new StringBuilder();
+        for (PathMapping m : cfg.getMappings()) {
+            sb.append(m.getLocalRoot()).append('|').append(m.getRemoteRoot()).append(';');
+        }
+        return sb.toString();
     }
 
     @Override
@@ -83,6 +91,11 @@ public class ServersState implements PersistentStateComponent<ServersState.State
     @Override
     public void loadState(@NotNull State state) {
         this.state = state;
+        if (state.servers != null) {
+            for (ServerConfig cfg : state.servers) {
+                cfg.migrateLegacyMapping();
+            }
+        }
     }
 
     public List<ServerConfig> getServers() {

@@ -3,22 +3,19 @@ package com.gqh.sftpupload;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Stream;
+import java.util.Map;
 
 /**
- * 把选中的文件/目录映射到远端路径并上传。
+ * 把选中的文件/目录按路径映射分发到各自的远端目录并上传。
  */
 final class UploadRunner {
 
@@ -34,31 +31,16 @@ final class UploadRunner {
             showNotification(project, "上传失败", "拿不到项目根目录", NotificationType.ERROR);
             return;
         }
-
-        Path localRoot = Paths.get(basePath).resolve(cfg.getLocalRoot()).normalize();
-        final String remoteRoot = trimTrailingSlash(cfg.getRemoteRoot());
-        if (remoteRoot.isEmpty()) {
-            showNotification(project, "上传失败", "服务器「" + cfg.getName() + "」没有配置远端目录", NotificationType.ERROR);
+        if (cfg.getMappings().isEmpty()) {
+            showNotification(project, "上传失败",
+                    "服务器「" + cfg.getName() + "」还没有配置路径映射", NotificationType.ERROR);
             return;
         }
 
-        final List<Path> files = new ArrayList<>();
+        final Path projectBase = Paths.get(basePath);
+        final List<Path> paths = new ArrayList<>();
         for (VirtualFile vf : targets) {
-            Path p = Paths.get(vf.getPath());
-            if (Files.isDirectory(p)) {
-                try (Stream<Path> walk = Files.walk(p)) {
-                    walk.filter(Files::isRegularFile).forEach(files::add);
-                } catch (IOException e) {
-                    showNotification(project, "上传失败", "读取目录失败：" + p, NotificationType.ERROR);
-                    return;
-                }
-            } else {
-                files.add(p);
-            }
-        }
-        if (files.isEmpty()) {
-            showNotification(project, "没有可上传的文件", "选中的都是空目录", NotificationType.WARNING);
-            return;
+            paths.add(Paths.get(vf.getPath()));
         }
 
         final String password = resolvePassword(project, cfg);
@@ -69,46 +51,107 @@ final class UploadRunner {
         new Task.Backgroundable(project, "上传到 " + cfg.menuText(), true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
-                indicator.setIndeterminate(false);
-                int done = 0;
-                List<String> skipped = new ArrayList<>();
-                try (SftpUploader uploader = SftpUploader.connect(cfg, password)) {
-                    for (Path file : files) {
-                        if (indicator.isCanceled()) {
-                            return;
-                        }
-                        indicator.setFraction((double) done / files.size());
-                        indicator.setText2(file.getFileName().toString());
+                indicator.setIndeterminate(true);
+                UploadPlan plan = UploadPlan.build(projectBase, cfg.getMappings(), paths);
+                if (plan.totalFiles() == 0) {
+                    showNotification(project, "没有可上传的文件", emptyMessage(cfg), NotificationType.WARNING);
+                    return;
+                }
 
-                        Path rel;
-                        try {
-                            rel = localRoot.relativize(file);
-                        } catch (IllegalArgumentException e) {
-                            skipped.add(file.toString());
-                            continue;
+                indicator.setIndeterminate(false);
+                int total = plan.totalFiles();
+                int done = 0;
+                StringBuilder summary = new StringBuilder();
+                try (SftpUploader uploader = SftpUploader.connect(cfg, password)) {
+                    for (UploadPlan.Group group : plan.groups.values()) {
+                        PathMapping mapping = group.mapping;
+                        String remoteRoot = trimTrailingSlash(mapping.getRemoteRoot());
+                        int count = 0;
+                        for (Path file : group.files) {
+                            if (indicator.isCanceled()) {
+                                return;
+                            }
+                            indicator.setFraction((double) done / total);
+                            indicator.setText2(mapping.getName() + " · " + file.getFileName());
+
+                            Path rel = group.localRoot.relativize(file);
+                            String remote = remoteRoot + "/" + rel.toString().replace('\\', '/');
+                            uploader.upload(file, remote);
+                            done++;
+                            count++;
                         }
-                        if (rel.startsWith("..")) {
-                            skipped.add(file.toString());
-                            continue;
-                        }
-                        String remote = remoteRoot + "/" + rel.toString().replace('\\', '/');
-                        uploader.upload(file, remote);
-                        done++;
+                        summary.append("\n  ").append(mapping.getName()).append(" ").append(count)
+                                .append(" 个 → ").append(remoteRoot);
                     }
                     indicator.setFraction(1.0);
 
-                    String msg = "已上传 " + done + " 个文件到 " + cfg.menuText()
-                            + "\n" + cfg.getUsername() + "@" + cfg.getHost() + ":" + remoteRoot;
-                    if (!skipped.isEmpty()) {
-                        msg += "\n\n跳过 " + skipped.size() + " 个不在 " + cfg.getLocalRoot() + " 下的文件：\n"
-                                + String.join("\n", skipped.subList(0, Math.min(5, skipped.size())));
+                    StringBuilder msg = new StringBuilder();
+                    msg.append("已上传 ").append(done).append(" 个文件到 ").append(cfg.menuText())
+                            .append("\n").append(cfg.getUsername()).append("@").append(cfg.getHost())
+                            .append(":").append(cfg.getPort())
+                            .append(summary);
+                    String extra = extraNotes(plan);
+                    if (!extra.isEmpty()) {
+                        msg.append("\n\n").append(extra);
                     }
-                    showNotification(project, "上传完成", msg, skipped.isEmpty() ? NotificationType.INFORMATION : NotificationType.WARNING);
+                    showNotification(project, "上传完成", msg.toString(),
+                            plan.unmatched.isEmpty() && plan.walkErrors.isEmpty()
+                                    ? NotificationType.INFORMATION : NotificationType.WARNING);
                 } catch (Exception e) {
                     showNotification(project, "上传失败", describe(e), NotificationType.ERROR);
                 }
             }
         }.queue();
+    }
+
+    /** 按映射预览这次会传到哪几个远端目录，用于菜单文案和生产环境确认弹窗。 */
+    static String previewText(@NotNull Project project, @NotNull ServerConfig cfg, VirtualFile[] targets) {
+        String basePath = project.getBasePath();
+        if (basePath == null || cfg.getMappings().isEmpty() || targets == null || targets.length == 0) {
+            return "";
+        }
+        List<Path> paths = new ArrayList<>();
+        for (VirtualFile vf : targets) {
+            paths.add(Paths.get(vf.getPath()));
+        }
+        Map<String, Integer> preview = UploadPlan.preview(Paths.get(basePath), cfg.getMappings(), paths);
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Integer> e : preview.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append(" · ");
+            }
+            sb.append(e.getKey()).append(" ").append(e.getValue());
+        }
+        return sb.toString();
+    }
+
+    private static String emptyMessage(ServerConfig cfg) {
+        StringBuilder sb = new StringBuilder("选中的内容不在任何映射目录下。当前映射：");
+        for (PathMapping m : cfg.getMappings()) {
+            sb.append("\n  ").append(m.getName()).append("：").append(m.getLocalRoot());
+        }
+        return sb.toString();
+    }
+
+    private static String extraNotes(UploadPlan plan) {
+        StringBuilder sb = new StringBuilder();
+        if (!plan.unmatched.isEmpty()) {
+            sb.append("忽略 ").append(plan.unmatched.size()).append(" 个不在任何映射目录下的路径：\n");
+            int limit = Math.min(5, plan.unmatched.size());
+            for (int i = 0; i < limit; i++) {
+                sb.append("  ").append(plan.unmatched.get(i)).append('\n');
+            }
+        }
+        if (!plan.walkErrors.isEmpty()) {
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append("有 ").append(plan.walkErrors.size()).append(" 个目录读取失败：\n");
+            for (int i = 0; i < Math.min(3, plan.walkErrors.size()); i++) {
+                sb.append("  ").append(plan.walkErrors.get(i)).append('\n');
+            }
+        }
+        return sb.toString().trim();
     }
 
     private static String resolvePassword(Project project, ServerConfig cfg) {
@@ -145,7 +188,7 @@ final class UploadRunner {
                 .notify(project);
     }
 
-    private static String trimTrailingSlash(String s) {
+    static String trimTrailingSlash(String s) {
         String r = s.trim();
         while (r.endsWith("/") && r.length() > 1) {
             r = r.substring(0, r.length() - 1);

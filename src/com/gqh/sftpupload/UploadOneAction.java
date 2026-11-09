@@ -10,17 +10,26 @@ import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * 每台服务器对应一个菜单项，点它就把选中的文件传上去。
+ * 每台服务器对应一个菜单项，点它就把选中的文件按路径映射分发上传。
  */
 public class UploadOneAction extends AnAction {
 
     private final ServerConfig server;
 
-    public UploadOneAction(ServerConfig server) {
-        super(server.menuText() + "   (" + server.getHost() + ":" + server.getPort() + ")",
-                "上传到 " + server.getUsername() + "@" + server.getHost() + ":" + server.getPort()
-                        + "  " + server.getRemoteRoot(), null);
+    public UploadOneAction(ServerConfig server, String preview) {
+        super(menuText(server, preview), description(server), null);
         this.server = server;
+    }
+
+    private static String menuText(ServerConfig server, String preview) {
+        String base = server.menuText() + "   (" + server.getHost() + ":" + server.getPort() + ")";
+        return preview.isEmpty() ? base : base + "   " + preview;
+    }
+
+    private static String description(ServerConfig server) {
+        String head = "上传到 " + server.getUsername() + "@" + server.getHost() + ":" + server.getPort();
+        String mappings = server.mappingsSummary();
+        return mappings.isEmpty() ? head : head + "\n" + mappings;
     }
 
     @Override
@@ -38,11 +47,13 @@ public class UploadOneAction extends AnAction {
 
     /** 生产环境多问一句，默认按钮是「取消」，回车不会误传。 */
     private boolean confirmProduction(Project project, VirtualFile[] files) {
-        String message = "即将上传 " + files.length + " 个文件/目录到【生产环境】\n\n"
+        String preview = UploadRunner.previewText(project, server, files);
+        String message = "即将把 " + files.length + " 个选中项上传到【生产环境】\n\n"
                 + "服务器：" + server.getName() + "\n"
                 + "地址：" + server.getUsername() + "@" + server.getHost() + ":" + server.getPort() + "\n"
-                + "远端目录：" + server.getRemoteRoot() + "\n\n"
-                + "确认目标是生产服务器并且要上传吗？";
+                + "将分发到：" + (preview.isEmpty() ? "（选中项不在任何映射目录下）" : preview)
+                + "\n" + server.mappingsSummary()
+                + "\n\n确认目标是生产服务器并且要上传吗？";
         int result = Messages.showDialog(project, message, "生产环境 · 二次确认",
                 new String[]{"取消", "确认上传"}, 0, Messages.getWarningIcon());
         return result == 1;

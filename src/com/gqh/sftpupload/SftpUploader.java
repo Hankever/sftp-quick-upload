@@ -57,10 +57,17 @@ public final class SftpUploader implements AutoCloseable {
         }
     }
 
-    /** 只用于“测试连接”，连上立刻断开。 */
+    /** 只用于“测试连接”，连上立刻断开；逐条检查所有映射的远端目录是否可访问。 */
     public static void test(ServerConfig cfg, String password) throws IOException {
         try (SftpUploader u = connect(cfg, password)) {
-            u.sftp.stat(u.normalizeRemote(cfg.getRemoteRoot()));
+            for (PathMapping mapping : cfg.getMappings()) {
+                try {
+                    u.sftp.stat(u.normalizeRemote(mapping.getRemoteRoot()));
+                } catch (IOException e) {
+                    throw new IOException("映射「" + mapping.getName() + "」的远端目录不存在或不可访问："
+                            + mapping.getRemoteRoot() + "\n" + e.getMessage(), e);
+                }
+            }
         }
     }
 

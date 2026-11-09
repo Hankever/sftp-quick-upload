@@ -71,7 +71,11 @@ final class LegacyConfig {
                 return new ArrayList<>();
             }
             ServersState.State state = XmlSerializer.deserialize(component, ServersState.State.class);
-            return state.servers == null ? new ArrayList<>() : new ArrayList<>(state.servers);
+            List<ServerConfig> servers = state.servers == null ? new ArrayList<>() : new ArrayList<>(state.servers);
+            for (ServerConfig cfg : servers) {
+                cfg.migrateLegacyMapping();
+            }
+            return servers;
         } catch (Exception e) {
             LOG.warn("读取旧版全局配置失败，已忽略：" + path, e);
             return new ArrayList<>();

@@ -35,13 +35,18 @@ public class PasswordDialog extends DialogWrapper {
         JPanel panel = FormBuilder.createFormBuilder()
                 .addComponent(new JBLabel("<html>服务器：<b>" + cfg.getUsername() + "@" + cfg.getHost()
                         + ":" + cfg.getPort() + "</b></html>"))
-                .addComponent(new JBLabel("<html>目标目录：<b>" + cfg.getRemoteRoot() + "</b></html>"))
+                .addComponent(new JBLabel("<html>目标目录：<b>" + cfg.getMappings().size() + " 个路径映射</b>"
+                        + pre(cfg.mappingsSummary()) + "</html>"))
                 .addVerticalGap(8)
                 .addLabeledComponent("密码：", passwordField)
                 .addComponent(rememberBox)
                 .getPanel();
         passwordField.requestFocusInWindow();
         return panel;
+    }
+
+    private static String pre(String text) {
+        return text.isEmpty() ? "" : "<pre>" + text + "</pre>";
     }
 
     public @NotNull String getPassword() {

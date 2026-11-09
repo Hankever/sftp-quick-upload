@@ -4,12 +4,12 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.FormBuilder;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.BoxLayout;
@@ -23,31 +23,40 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
- * 服务器管理窗口：左边列表，右边表单。配置只作用于当前项目。
+ * 服务器管理窗口：左边服务器列表，右边服务器信息 + 路径映射。配置只作用于当前项目。
  */
 public class SettingsDialog extends DialogWrapper {
 
     private final Project project;
     private final List<ServerConfig> servers = new ArrayList<>();
-    private final DefaultListModel<String> listModel = new DefaultListModel<>();
-    private final JList<String> list = new JBList<>(listModel);
+
+    private final DefaultListModel<String> serverListModel = new DefaultListModel<>();
+    private final JList<String> serverList = new JBList<>(serverListModel);
+
+    private final DefaultListModel<String> mappingListModel = new DefaultListModel<>();
+    private final JList<String> mappingList = new JBList<>(mappingListModel);
 
     private final JBTextField nameField = new JBTextField();
     private final JBTextField hostField = new JBTextField();
     private final JBTextField portField = new JBTextField();
     private final JBTextField userField = new JBTextField();
-    private final JBTextField localRootField = new JBTextField();
-    private final JBTextField remoteRootField = new JBTextField();
     private final JCheckBox productionBox = new JCheckBox("生产环境（上传前二次确认）");
+
+    private final JBTextField mappingNameField = new JBTextField();
+    private final JBTextField mappingLocalField = new JBTextField();
+    private final JBTextField mappingRemoteField = new JBTextField();
 
     private JBLabel legacyLabel;
     private JButton legacyImportButton;
     private JButton legacyClearButton;
 
     private int currentIndex = -1;
+    private int currentMappingIndex = -1;
     private boolean loading;
 
     public SettingsDialog(@Nullable Project project) {
@@ -61,68 +70,89 @@ public class SettingsDialog extends DialogWrapper {
         for (ServerConfig s : ServersState.serversOf(project)) {
             servers.add(s.copy());
         }
-        rebuildList();
+        rebuildServerList();
         init();
         if (!servers.isEmpty()) {
-            list.setSelectedIndex(0);
+            serverList.setSelectedIndex(0);
         }
     }
 
-    private void rebuildList() {
-        listModel.clear();
-        for (ServerConfig s : servers) {
-            listModel.addElement(s.listText());
-        }
-    }
+    // ---------------- UI ----------------
 
     @Override
     protected @Nullable JComponent createCenterPanel() {
-        list.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
-        list.addListSelectionListener(e -> {
+        serverList.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        serverList.addListSelectionListener(e -> {
             if (loading || e.getValueIsAdjusting()) {
                 return;
             }
-            int idx = list.getSelectedIndex();
+            int idx = serverList.getSelectedIndex();
             if (idx == currentIndex) {
                 return;
             }
-            flushForm();
+            flushMappingForm();
+            flushServerForm();
             currentIndex = idx;
-            loadForm();
+            loadServerForm();
         });
 
-        JBScrollPane scroll = new JBScrollPane(list);
-        scroll.setPreferredSize(new Dimension(340, 200));
+        mappingList.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        mappingList.addListSelectionListener(e -> {
+            if (loading || e.getValueIsAdjusting()) {
+                return;
+            }
+            int idx = mappingList.getSelectedIndex();
+            if (idx == currentMappingIndex) {
+                return;
+            }
+            flushMappingForm();
+            currentMappingIndex = idx;
+            loadMappingForm();
+        });
 
         JPanel left = new JPanel(new BorderLayout(0, 6));
         left.add(new JBLabel("本项目的服务器"), BorderLayout.NORTH);
-        left.add(scroll, BorderLayout.CENTER);
-
-        JPanel buttons = new JPanel();
-        buttons.setLayout(new BoxLayout(buttons, BoxLayout.Y_AXIS));
-        buttons.add(buttonRow(newButton("新增", this::addServer),
-                newButton("复制", this::duplicateServer),
-                newButton("删除", this::removeServer)));
-        buttons.add(buttonRow(newButton("测试连接", this::testConnection),
-                newButton("清除密码", this::clearPassword)));
-        left.add(buttons, BorderLayout.SOUTH);
+        JBScrollPane serverScroll = new JBScrollPane(serverList);
+        serverScroll.setPreferredSize(new Dimension(260, 150));
+        left.add(serverScroll, BorderLayout.CENTER);
+        JPanel serverButtons = new JPanel();
+        serverButtons.setLayout(new BoxLayout(serverButtons, BoxLayout.Y_AXIS));
+        serverButtons.add(buttonRow(button("新增", this::addServer),
+                button("复制", this::duplicateServer),
+                button("删除", this::removeServer)));
+        serverButtons.add(buttonRow(button("测试连接", this::testConnection),
+                button("清除密码", this::clearPassword)));
+        left.add(serverButtons, BorderLayout.SOUTH);
 
         portField.setColumns(6);
+        userField.setColumns(12);
         JPanel portRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         portRow.add(portField);
         portRow.add(new JBLabel("   用户名："));
-        userField.setColumns(14);
         portRow.add(userField);
+
+        JBScrollPane mappingScroll = new JBScrollPane(mappingList);
+        mappingScroll.setPreferredSize(new Dimension(430, 88));
+
+        JPanel mappingButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+        mappingButtons.add(button("新增映射", this::addMapping));
+        mappingButtons.add(button("删除映射", this::removeMapping));
 
         JPanel right = FormBuilder.createFormBuilder()
                 .addLabeledComponent("名称：", nameField)
                 .addLabeledComponent("主机：", hostField)
                 .addLabeledComponent("端口 / 用户：", portRow)
-                .addLabeledComponent("本地目录：", localRootField)
-                .addLabeledComponent("远端目录：", remoteRootField)
                 .addComponent(productionBox)
-                .addComponent(new JBLabel("<html><i>本地目录相对项目根，例如 src/main/webapp；"
-                        + "远端目录填绝对路径，例如 /var/www/app</i></html>"))
+                .addComponent(new TitledSeparator("路径映射"))
+                .addComponent(new JBLabel("<html>选中的文件按所在目录匹配到一条映射，"
+                        + "再按「远端目录 + 相对本地目录的路径」上传；多选里混着网页和资源文件也能一次传完。</html>"))
+                .addComponent(mappingScroll)
+                .addComponent(mappingButtons)
+                .addLabeledComponent("备注：", mappingNameField)
+                .addLabeledComponent("本地目录：", mappingLocalField)
+                .addLabeledComponent("远端目录：", mappingRemoteField)
+                .addComponent(new JBLabel("<html><i>本地目录相对项目根，例如 src/main/resources；"
+                        + "远端目录填绝对路径，例如 /var/www/app/WEB-INF/classes</i></html>"))
                 .addComponent(new JBLabel("<html><i>这些配置只对当前项目生效，保存在项目的 .idea 目录，"
                         + "不会和其他项目共用。</i></html>"))
                 .getPanel();
@@ -145,8 +175,8 @@ public class SettingsDialog extends DialogWrapper {
             return null;
         }
         legacyLabel = new JBLabel();
-        legacyImportButton = newButton("导入到本项目", this::importLegacy);
-        legacyClearButton = newButton("清除旧配置", this::clearLegacy);
+        legacyImportButton = button("导入到本项目", this::importLegacy);
+        legacyClearButton = button("清除旧配置", this::clearLegacy);
         updateLegacyBanner();
 
         JPanel banner = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
@@ -156,13 +186,33 @@ public class SettingsDialog extends DialogWrapper {
         return banner;
     }
 
+    private static JButton button(String text, Runnable action) {
+        JButton b = new JButton(text);
+        b.addActionListener(e -> action.run());
+        return b;
+    }
+
+    private static JPanel buttonRow(JButton... items) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+        for (JButton b : items) {
+            row.add(b);
+        }
+        return row;
+    }
+
+    // ---------------- 旧配置导入 ----------------
+
     private void updateLegacyBanner() {
         if (legacyLabel == null) {
             return;
         }
         int count = LegacyConfig.size();
         legacyLabel.setText("<html>检测到旧版全局配置（" + count + " 台服务器，以前所有项目共用）</html>");
-        boolean has = count > 0;
+        updateLegacyButtons();
+    }
+
+    private void updateLegacyButtons() {
+        boolean has = !LegacyConfig.isEmpty();
         if (legacyImportButton != null) {
             legacyImportButton.setEnabled(has);
         }
@@ -172,7 +222,8 @@ public class SettingsDialog extends DialogWrapper {
     }
 
     private void importLegacy() {
-        flushForm();
+        flushMappingForm();
+        flushServerForm();
         List<ServerConfig> pool = new ArrayList<>(servers);
         List<ServerConfig> toAdd = new ArrayList<>();
         for (ServerConfig legacyConfig : LegacyConfig.servers()) {
@@ -189,8 +240,9 @@ public class SettingsDialog extends DialogWrapper {
         }
         servers.addAll(toAdd);
         currentIndex = -1;
-        rebuildList();
-        list.setSelectedIndex(servers.size() - toAdd.size());
+        currentMappingIndex = -1;
+        rebuildServerList();
+        serverList.setSelectedIndex(servers.size() - toAdd.size());
         if (legacyLabel != null) {
             legacyLabel.setText("<html>已导入 " + toAdd.size() + " 台服务器，<b>记得点「保存」生效</b>。"
                     + "旧配置仍保留，其他项目也可以导入。</html>");
@@ -207,64 +259,56 @@ public class SettingsDialog extends DialogWrapper {
         LegacyConfig.clear();
         if (legacyLabel != null) {
             legacyLabel.setText("<html>旧版全局配置已清除</html>");
-            updateButtonsEnabled();
+            updateLegacyButtons();
         }
     }
 
-    private void updateButtonsEnabled() {
-        boolean has = !LegacyConfig.isEmpty();
-        if (legacyImportButton != null) {
-            legacyImportButton.setEnabled(has);
-        }
-        if (legacyClearButton != null) {
-            legacyClearButton.setEnabled(has);
-        }
-    }
+    // ---------------- 服务器 ----------------
 
-    private static JButton newButton(String text, Runnable action) {
-        JButton b = new JButton(text);
-        b.addActionListener(e -> action.run());
-        return b;
-    }
-
-    private static JPanel buttonRow(JButton... items) {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-        for (JButton b : items) {
-            row.add(b);
+    private void rebuildServerList() {
+        serverListModel.clear();
+        for (ServerConfig s : servers) {
+            serverListModel.addElement(s.listText());
         }
-        return row;
     }
 
     private void addServer() {
-        flushForm();
+        flushMappingForm();
+        flushServerForm();
         ServerConfig s = new ServerConfig();
         s.setName("服务器" + (servers.size() + 1));
+        s.addMapping(new PathMapping("网页", "src/main/webapp", ""));
         servers.add(s);
-        rebuildList();
-        list.setSelectedIndex(servers.size() - 1);
+        currentIndex = -1;
+        currentMappingIndex = -1;
+        rebuildServerList();
+        serverList.setSelectedIndex(servers.size() - 1);
         nameField.requestFocusInWindow();
     }
 
     private void duplicateServer() {
-        flushForm();
+        flushMappingForm();
+        flushServerForm();
         if (currentIndex < 0 || currentIndex >= servers.size()) {
             return;
         }
         int idx = currentIndex;
         servers.add(idx + 1, servers.get(idx).duplicate());
-        // 重建列表会先触发一次「取消选中」，把 currentIndex 清掉，所以先记下目标位置
         currentIndex = -1;
-        rebuildList();
-        list.setSelectedIndex(idx + 1);
+        currentMappingIndex = -1;
+        rebuildServerList();
+        serverList.setSelectedIndex(idx + 1);
     }
 
     private void removeServer() {
-        int idx = list.getSelectedIndex();
+        flushMappingForm();
+        flushServerForm();
+        int idx = serverList.getSelectedIndex();
         if (idx < 0) {
             return;
         }
         int answer = Messages.showYesNoDialog(project,
-                "确定删除服务器「" + servers.get(idx).getName() + "」吗？\n（如果它只是本项目的临时配置，删除不影响其他项目）",
+                "确定删除服务器「" + servers.get(idx).getName() + "」吗？\n（只影响当前项目）",
                 "删除服务器", Messages.getQuestionIcon());
         if (answer != Messages.YES) {
             return;
@@ -272,16 +316,18 @@ public class SettingsDialog extends DialogWrapper {
         ServerConfig removed = servers.remove(idx);
         PasswordUtil.clear(removed);
         currentIndex = -1;
-        rebuildList();
+        currentMappingIndex = -1;
+        rebuildServerList();
         if (!servers.isEmpty()) {
-            list.setSelectedIndex(Math.min(idx, servers.size() - 1));
+            serverList.setSelectedIndex(Math.min(idx, servers.size() - 1));
         } else {
-            clearForm();
+            clearServerForm();
         }
     }
 
     private void clearPassword() {
-        flushForm();
+        flushMappingForm();
+        flushServerForm();
         if (currentIndex < 0) {
             return;
         }
@@ -289,14 +335,197 @@ public class SettingsDialog extends DialogWrapper {
         Messages.showInfoMessage(project, "已清除「" + servers.get(currentIndex).getName() + "」保存的密码", "提示");
     }
 
-    private void testConnection() {
-        flushForm();
-        if (currentIndex < 0) {
+    // ---------------- 路径映射 ----------------
+
+    private @Nullable ServerConfig currentServer() {
+        if (currentIndex < 0 || currentIndex >= servers.size()) {
+            return null;
+        }
+        return servers.get(currentIndex);
+    }
+
+    private void rebuildMappingList() {
+        boolean old = loading;
+        loading = true;
+        try {
+            mappingListModel.clear();
+            ServerConfig s = currentServer();
+            if (s != null) {
+                for (PathMapping m : s.getMappings()) {
+                    mappingListModel.addElement(m.listText());
+                }
+            }
+        } finally {
+            loading = old;
+        }
+    }
+
+    private void addMapping() {
+        flushMappingForm();
+        ServerConfig s = currentServer();
+        if (s == null) {
             return;
         }
-        ServerConfig cfg = servers.get(currentIndex);
+        s.addMapping(new PathMapping("映射" + (s.getMappings().size() + 1), "", ""));
+        currentMappingIndex = -1;
+        rebuildMappingList();
+        mappingList.setSelectedIndex(s.getMappings().size() - 1);
+        mappingLocalField.requestFocusInWindow();
+    }
+
+    private void removeMapping() {
+        flushMappingForm();
+        ServerConfig s = currentServer();
+        if (s == null || currentMappingIndex < 0 || currentMappingIndex >= s.getMappings().size()) {
+            return;
+        }
+        if (s.getMappings().size() <= 1) {
+            Messages.showWarningDialog(project, "每台服务器至少要保留一条路径映射", "不能删除");
+            return;
+        }
+        s.getMappings().remove(currentMappingIndex);
+        currentMappingIndex = -1;
+        rebuildMappingList();
+        if (!s.getMappings().isEmpty()) {
+            mappingList.setSelectedIndex(0);
+        } else {
+            clearMappingForm();
+        }
+    }
+
+    private void loadMappingForm() {
+        loading = true;
+        try {
+            ServerConfig s = currentServer();
+            if (s == null || currentMappingIndex < 0 || currentMappingIndex >= s.getMappings().size()) {
+                clearMappingFields();
+                return;
+            }
+            PathMapping m = s.getMappings().get(currentMappingIndex);
+            mappingNameField.setText(m.getName());
+            mappingLocalField.setText(m.getLocalRoot());
+            mappingRemoteField.setText(m.getRemoteRoot());
+        } finally {
+            loading = false;
+        }
+    }
+
+    private void clearMappingForm() {
+        loading = true;
+        try {
+            clearMappingFields();
+        } finally {
+            loading = false;
+        }
+    }
+
+    private void clearMappingFields() {
+        mappingNameField.setText("");
+        mappingLocalField.setText("");
+        mappingRemoteField.setText("");
+    }
+
+    private void flushMappingForm() {
+        ServerConfig s = currentServer();
+        if (s == null || currentMappingIndex < 0 || currentMappingIndex >= s.getMappings().size()) {
+            return;
+        }
+        PathMapping m = s.getMappings().get(currentMappingIndex);
+        m.setName(mappingNameField.getText().trim());
+        m.setLocalRoot(mappingLocalField.getText().trim());
+        m.setRemoteRoot(mappingRemoteField.getText().trim());
+        if (currentMappingIndex < mappingListModel.size()) {
+            mappingListModel.set(currentMappingIndex, m.listText());
+        }
+    }
+
+    // ---------------- 服务器表单 ----------------
+
+    private void loadServerForm() {
+        loading = true;
+        try {
+            ServerConfig s = currentServer();
+            if (s == null) {
+                clearServerFields();
+                currentMappingIndex = -1;
+                clearMappingFields();
+                return;
+            }
+            nameField.setText(s.getName());
+            hostField.setText(s.getHost());
+            portField.setText(String.valueOf(s.getPort()));
+            userField.setText(s.getUsername());
+            productionBox.setSelected(s.isProduction());
+        } finally {
+            loading = false;
+        }
+        if (currentServer() == null) {
+            rebuildMappingList();
+            return;
+        }
+        currentMappingIndex = -1;
+        rebuildMappingList();
+        if (!mappingListModel.isEmpty()) {
+            mappingList.setSelectedIndex(0);
+        } else {
+            clearMappingForm();
+        }
+    }
+
+    private void clearServerForm() {
+        loading = true;
+        try {
+            clearServerFields();
+        } finally {
+            loading = false;
+        }
+        currentMappingIndex = -1;
+        rebuildMappingList();
+        clearMappingForm();
+    }
+
+    private void clearServerFields() {
+        nameField.setText("");
+        hostField.setText("");
+        portField.setText("22");
+        userField.setText("");
+        productionBox.setSelected(false);
+    }
+
+    private void flushServerForm() {
+        ServerConfig s = currentServer();
+        if (s == null) {
+            return;
+        }
+        s.setName(nameField.getText().trim());
+        s.setHost(hostField.getText().trim());
+        try {
+            s.setPort(Integer.parseInt(portField.getText().trim()));
+        } catch (NumberFormatException ignore) {
+            s.setPort(22);
+        }
+        s.setUsername(userField.getText().trim());
+        s.setProduction(productionBox.isSelected());
+        if (currentIndex < serverListModel.size()) {
+            serverListModel.set(currentIndex, s.listText());
+        }
+    }
+
+    // ---------------- 测试连接 ----------------
+
+    private void testConnection() {
+        flushMappingForm();
+        flushServerForm();
+        ServerConfig cfg = currentServer();
+        if (cfg == null) {
+            return;
+        }
         if (cfg.getHost().isEmpty() || cfg.getUsername().isEmpty()) {
             Messages.showWarningDialog(project, "主机和用户名不能为空", "配置不完整");
+            return;
+        }
+        if (cfg.getMappings().isEmpty()) {
+            Messages.showWarningDialog(project, "至少要配置一条路径映射", "配置不完整");
             return;
         }
         String pwd = PasswordUtil.get(cfg);
@@ -322,83 +551,47 @@ public class SettingsDialog extends DialogWrapper {
 
         if (error[0] == null) {
             Messages.showInfoMessage(project,
-                    "连接成功，目标目录可访问：\n" + cfg.getRemoteRoot(), "测试连接");
+                    "连接成功，" + cfg.getMappings().size() + " 个远端目录都可访问：\n"
+                            + cfg.mappingsSummary(), "测试连接");
         } else {
             Messages.showErrorDialog(project, UploadRunner.describe(error[0]), "连接失败");
         }
     }
 
-    private void loadForm() {
-        loading = true;
-        try {
-            if (currentIndex < 0 || currentIndex >= servers.size()) {
-                clearForm();
-                return;
-            }
-            ServerConfig s = servers.get(currentIndex);
-            nameField.setText(s.getName());
-            hostField.setText(s.getHost());
-            portField.setText(String.valueOf(s.getPort()));
-            userField.setText(s.getUsername());
-            localRootField.setText(s.getLocalRoot());
-            remoteRootField.setText(s.getRemoteRoot());
-            productionBox.setSelected(s.isProduction());
-        } finally {
-            loading = false;
-        }
-    }
-
-    private void clearForm() {
-        loading = true;
-        try {
-            nameField.setText("");
-            hostField.setText("");
-            portField.setText("22");
-            userField.setText("");
-            localRootField.setText("src/main/webapp");
-            remoteRootField.setText("");
-            productionBox.setSelected(false);
-        } finally {
-            loading = false;
-        }
-    }
-
-    private void flushForm() {
-        if (currentIndex < 0 || currentIndex >= servers.size()) {
-            return;
-        }
-        ServerConfig s = servers.get(currentIndex);
-        s.setName(nameField.getText().trim());
-        s.setHost(hostField.getText().trim());
-        try {
-            s.setPort(Integer.parseInt(portField.getText().trim()));
-        } catch (NumberFormatException ignore) {
-            s.setPort(22);
-        }
-        s.setUsername(userField.getText().trim());
-        s.setLocalRoot(localRootField.getText().trim());
-        s.setRemoteRoot(remoteRootField.getText().trim());
-        s.setProduction(productionBox.isSelected());
-        if (currentIndex < listModel.size()) {
-            listModel.set(currentIndex, s.listText());
-        }
-    }
+    // ---------------- 保存 ----------------
 
     @Override
     protected void doOKAction() {
-        flushForm();
+        flushMappingForm();
+        flushServerForm();
         for (ServerConfig s : servers) {
             if (s.getName().isEmpty()) {
                 setErrorText("服务器名称不能为空");
                 return;
             }
-            if (s.getHost().isEmpty() || s.getUsername().isEmpty() || s.getRemoteRoot().isEmpty()) {
-                setErrorText("「" + s.getName() + "」的主机、用户名、远端目录都不能为空");
+            if (s.getHost().isEmpty() || s.getUsername().isEmpty()) {
+                setErrorText("「" + s.getName() + "」的主机、用户名不能为空");
                 return;
             }
             if (s.getPort() <= 0 || s.getPort() > 65535) {
                 setErrorText("「" + s.getName() + "」的端口不合法");
                 return;
+            }
+            if (s.getMappings().isEmpty()) {
+                setErrorText("「" + s.getName() + "」至少要配置一条路径映射");
+                return;
+            }
+            Set<String> locals = new HashSet<>();
+            for (PathMapping m : s.getMappings()) {
+                if (m.getLocalRoot().isEmpty() || m.getRemoteRoot().isEmpty()) {
+                    setErrorText("「" + s.getName() + "」的映射「" + m.getName() + "」本地目录和远端目录都不能为空");
+                    return;
+                }
+                if (!locals.add(m.getLocalRoot())) {
+                    setErrorText("「" + s.getName() + "」有重复的本地目录：" + m.getLocalRoot()
+                            + "；同一目录要传多个位置请分成子目录配置");
+                    return;
+                }
             }
         }
         super.doOKAction();

@@ -4,8 +4,10 @@ import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.Separator;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -30,8 +32,9 @@ public class UploadGroup extends ActionGroup {
 
         List<ServerConfig> servers = ServersState.serversOf(project);
         if (!servers.isEmpty()) {
+            VirtualFile[] selected = e == null ? null : e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY);
             for (ServerConfig server : servers) {
-                items.add(new UploadOneAction(server));
+                items.add(new UploadOneAction(server, previewOf(project, server, selected)));
             }
             return items.toArray(AnAction.EMPTY_ARRAY);
         }
@@ -66,6 +69,18 @@ public class UploadGroup extends ActionGroup {
             }
         });
         return items.toArray(AnAction.EMPTY_ARRAY);
+    }
+
+    /**
+     * 只有当选中的东西会分到两条以上映射时，才在菜单里提示分发结果，
+     * 例如「网页 3 · 资源 2」；单一映射时不加噪。
+     */
+    private static String previewOf(Project project, ServerConfig server, VirtualFile[] selected) {
+        if (project == null || selected == null || selected.length == 0) {
+            return "";
+        }
+        String preview = UploadRunner.previewText(project, server, selected);
+        return preview.contains("·") ? preview : "";
     }
 
     @Override
