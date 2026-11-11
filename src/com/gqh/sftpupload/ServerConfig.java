@@ -21,6 +21,9 @@ public class ServerConfig {
 
     private List<PathMapping> mappings = new ArrayList<>();
 
+    /** 上传成功后按规则调用接口（如清 XML 配置缓存），没有配置时默认关闭。 */
+    private PostUploadConfig postUpload = new PostUploadConfig();
+
     /** 1.1.x 及更早版本只有一条映射，这两个字段仅用于读取旧配置，迁移后会被清空。 */
     private String localRoot;
     private String remoteRoot;
@@ -88,6 +91,17 @@ public class ServerConfig {
         getMappings().add(mapping);
     }
 
+    public PostUploadConfig getPostUpload() {
+        if (postUpload == null) {
+            postUpload = new PostUploadConfig();
+        }
+        return postUpload;
+    }
+
+    public void setPostUpload(PostUploadConfig postUpload) {
+        this.postUpload = postUpload;
+    }
+
     // ---- 旧版单映射字段，仅供 XmlSerializer 读取 1.1.x 及更早的配置 ----
 
     public String getLocalRoot() {
@@ -132,6 +146,7 @@ public class ServerConfig {
         for (PathMapping m : getMappings()) {
             c.mappings.add(m.copy());
         }
+        c.postUpload = getPostUpload().copy();
         return c;
     }
 

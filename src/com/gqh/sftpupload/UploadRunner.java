@@ -5,6 +5,7 @@ import com.intellij.notification.NotificationType;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 
@@ -48,6 +49,10 @@ final class UploadRunner {
             return;
         }
 
+        // 上传成功后要按规则决定是否调用接口：run 里记录成功文件，onSuccess 在 EDT 上询问。
+        final List<Path> uploaded = new ArrayList<>();
+        final boolean[] finished = {false};
+
         new Task.Backgroundable(project, "上传到 " + cfg.menuText(), true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
@@ -77,6 +82,7 @@ final class UploadRunner {
                             Path rel = group.localRoot.relativize(file);
                             String remote = remoteRoot + "/" + rel.toString().replace('\\', '/');
                             uploader.upload(file, remote);
+                            uploaded.add(file);
                             done++;
                             count++;
                         }
@@ -84,12 +90,18 @@ final class UploadRunner {
                                 .append(" 个 → ").append(remoteRoot);
                     }
                     indicator.setFraction(1.0);
+                    finished[0] = true;
 
                     StringBuilder msg = new StringBuilder();
                     msg.append("已上传 ").append(done).append(" 个文件到 ").append(cfg.menuText())
                             .append("\n").append(cfg.getUsername()).append("@").append(cfg.getHost())
                             .append(":").append(cfg.getPort())
                             .append(summary);
+                    PostUploadConfig post = cfg.getPostUpload();
+                    int hits = post.isEnabled() ? matchedFiles(projectBase, post, uploaded).size() : 0;
+                    if (hits > 0) {
+                        msg.append("\n\n有 ").append(hits).append(" 个文件命中「上传后接口」规则。");
+                    }
                     String extra = extraNotes(plan);
                     if (!extra.isEmpty()) {
                         msg.append("\n\n").append(extra);
@@ -99,6 +111,74 @@ final class UploadRunner {
                                     ? NotificationType.INFORMATION : NotificationType.WARNING);
                 } catch (Exception e) {
                     showNotification(project, "上传失败", describe(e), NotificationType.ERROR);
+                }
+            }
+
+            /** 上传完整结束后（EDT）再问，取消或失败都不问。 */
+            @Override
+            public void onSuccess() {
+                if (!finished[0]) {
+                    return;
+                }
+                PostUploadConfig post = cfg.getPostUpload();
+                if (!post.isEnabled()) {
+                    return;
+                }
+                List<Path> hits = matchedFiles(projectBase, post, uploaded);
+                if (!hits.isEmpty()) {
+                    promptAndCall(project, post, projectBase, hits);
+                }
+            }
+        }.queue();
+    }
+
+    private static List<Path> matchedFiles(Path projectBase, PostUploadConfig post, List<Path> uploaded) {
+        List<Path> hits = new ArrayList<>();
+        for (Path file : uploaded) {
+            if (post.matches(projectBase, file)) {
+                hits.add(file);
+            }
+        }
+        return hits;
+    }
+
+    /** 命中规则后：按配置询问一次，确认后调用接口。 */
+    private static void promptAndCall(Project project, PostUploadConfig post, Path projectBase, List<Path> hits) {
+        if (post.isAskBeforeCall()) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("已上传的文件中有 ").append(hits.size()).append(" 个命中规则：");
+            int limit = Math.min(8, hits.size());
+            for (int i = 0; i < limit; i++) {
+                sb.append("\n  ").append(PostUploadConfig.relativePath(projectBase, hits.get(i)));
+            }
+            if (hits.size() > limit) {
+                sb.append("\n  …另外 ").append(hits.size() - limit).append(" 个");
+            }
+            sb.append("\n\n接口：").append(post.getMethod()).append(" ").append(post.getUrl());
+            sb.append("\n\n现在调用这个接口吗？");
+            int result = Messages.showDialog(project, sb.toString(), "上传完成 · 调用接口",
+                    new String[]{"调用接口", "暂不调用"}, 0, Messages.getQuestionIcon());
+            if (result != 0) {
+                return;
+            }
+        }
+        callInterface(project, post);
+    }
+
+    private static void callInterface(Project project, PostUploadConfig post) {
+        new Task.Backgroundable(project, "调用上传后接口", false) {
+            @Override
+            public void run(@NotNull ProgressIndicator indicator) {
+                indicator.setIndeterminate(true);
+                String head = post.getMethod() + " " + post.getUrl();
+                try {
+                    String response = PostUploadCaller.call(post);
+                    showNotification(project, "接口调用成功",
+                            head + (response.isEmpty() ? "" : "\n返回：" + response),
+                            NotificationType.INFORMATION);
+                } catch (Exception e) {
+                    showNotification(project, "接口调用失败", head + "\n" + describe(e),
+                            NotificationType.ERROR);
                 }
             }
         }.queue();

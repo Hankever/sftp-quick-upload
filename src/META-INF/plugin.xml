@@ -2,7 +2,7 @@
 <idea-plugin>
     <id>com.gqh.sftp-quick-upload</id>
     <name>Quick SFTP Upload</name>
-    <version>1.4.0</version>
+    <version>1.5.1</version>
     <vendor>gqh</vendor>
 
     <description><![CDATA[
@@ -10,6 +10,7 @@
         <p>服务器配置按项目保存，不同项目的测试/生产服务器互不干扰；生产环境可开启二次确认。</p>
         <p>一台服务器可配置多条路径映射（网页目录、资源目录…），多选混合也能按路径自动分发到各自的远端目录。</p>
         <p>菜单结构：右键 → 上传到服务器 → 第一项「设置服务器信息…」，下面依次是各台服务器。</p>
+        <p>上传成功后可按规则（如 *.xml）调用项目接口，典型用途是清理服务器端缓存；默认先弹窗询问，确认后才调用。</p>
         <p>只做手动上传，没有任何自动同步；密码保存在系统钥匙串中。</p>
     ]]></description>
 

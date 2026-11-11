@@ -27,6 +27,7 @@ IntelliJ IDEA 插件：右键把选中的文件或目录上传到预先配置好
 - **配置按项目隔离**：测试 / 生产各自一条，不同项目互不影响，不会出现"在 A 项目选到 B 项目服务器"的情况
 - **多路径映射**：一台服务器挂多条「本地目录 → 远端目录」，按选中文件所在目录自动分发；嵌套目录按最长前缀匹配，不会重复上传
 - **生产环境二次确认**：勾选「生产环境」的服务器，上传前弹窗列出会传到哪几个远端目录，默认按钮是「取消」
+- **上传后调用接口**：按规则（如 `*.xml`）命中已上传文件时，默认弹窗询问是否调用配置的接口；典型用途是上传 XML 后清服务器端缓存
 - **菜单直显主机**：菜单项后面带 `host:port`，点之前就能确认目标；生产服务器带【生产】前缀
 - **保留目录结构**：`src/main/webapp/pages/a.html` → `<网页映射的远端目录>/pages/a.html`
 - **多选与目录**：可以一次选多个文件，或直接选一个目录递归上传；选中映射目录的上级（如 `src/main`）也能正确分发
@@ -38,7 +39,7 @@ IntelliJ IDEA 插件：右键把选中的文件或目录上传到预先配置好
 ## 安装
 
 1. `Settings → Plugins → ⚙️ → Install Plugin from Disk…`
-2. 选择 `build/sftp-quick-upload-1.4.0.zip`（或 Releases 里的同名 zip）
+2. 选择 `build/sftp-quick-upload-1.5.1.zip`（或 Releases 里的同名 zip）
 3. 重启 IDE
 
 ## 配置
@@ -68,6 +69,23 @@ IntelliJ IDEA 插件：右键把选中的文件或目录上传到预先配置好
 | 资源 | src/main/resources | /var/www/app/WEB-INF/classes |
 
 上传时按「远端目录 + (文件路径 − 本地目录)」算目标，所以本地子结构原样保留。填好后点 **测试连接** 验证（会逐条检查所有远端目录，会弹密码框），确认无误再保存。
+
+### 上传后调用接口
+
+有些文件（比如 XML SQL 配置）上传完还要调一下服务端接口才生效。每台服务器可以单独配一组「上传后接口」；勾选「启用」后才会展开配置框，不勾选完全不影响上传：
+
+| 字段 | 说明 |
+|---|---|
+| 启用 | 勾选后才在上传成功后检查规则；不勾选完全不影响上传 |
+| 接口 | `GET` / `POST` + 完整 URL，参数直接写在 URL 里，如 `http://1.2.3.4:8080/tss/sqlconfig/refresh?token=xxx` |
+| 命中规则 | 每行一条，如 `*.xml`、`**/config/*.xml`；`*` 不跨目录、`**` 跨目录、`?` 单字符；不含 `/` 的规则只匹配文件名；留空表示所有文件 |
+| 请求头 | 每行一个 `Name: value`，可留空 |
+| 请求体 | POST 时发送，可留空 |
+| 调用前先询问 | 默认勾选：上传完成后弹窗列出命中的文件，确认后才调用；取消勾选则直接调用 |
+
+只有上传成功、且至少一个**成功上传**的文件命中规则时才会触发；取消上传或上传报错都不会调用。接口返回非 2xx 会以失败通知展示状态码和响应片段。
+
+> 接口地址里的 token 会明文保存在 `.idea/sftpQuickUpload.xml`，不要把该文件提交到版本库。
 
 ### 多项目
 
@@ -118,7 +136,7 @@ bash build.sh
 改好 `src/META-INF/plugin.xml` 的 `<version>`，打 tag 推上去，GitHub Actions 会自动编译并把 zip 传到 Releases：
 
 ```bash
-git tag -a v1.4.0 -m "1.4.0"
+git tag -a v1.5.1 -m "1.5.1"
 git push origin main --follow-tags
 ```
 
@@ -135,16 +153,18 @@ git push origin main --follow-tags
 src/
   META-INF/plugin.xml              插件声明：菜单注册、服务、通知组
   com/gqh/sftpupload/
-    ServerConfig.java              一台服务器的数据模型（含多条路径映射）
+    ServerConfig.java              一台服务器的数据模型（含路径映射、上传后接口）
     PathMapping.java               一条路径映射：本地目录 → 远端目录
+    PostUploadConfig.java          上传后调用接口的配置与命中规则（glob）
+    PostUploadCaller.java          调用上传后接口（HttpURLConnection）
     ServersState.java              项目级持久化（.idea/sftpQuickUpload.xml）
     LegacyConfig.java              1.0.x 的应用级配置，只作迁移来源
     UploadGroup.java               右键动态子菜单
     UploadOneAction.java           单台服务器的上传动作（含生产环境确认）
     UploadPlan.java                按映射分组、遍历文件、算出目标路径
-    UploadRunner.java              后台任务、SFTP 上传、结果通知
+    UploadRunner.java              后台任务、SFTP 上传、结果通知、上传后询问/调用接口
     SettingsAction.java            打开配置窗口
-    SettingsDialog.java            配置窗口 UI（服务器 + 路径映射）
+    SettingsDialog.java            配置窗口 UI（服务器 + 路径映射 + 上传后接口）
     PasswordDialog.java            首次上传时索要密码
     PasswordUtil.java              密码读写（PasswordSafe / 钥匙串）
     SftpUploader.java              SFTP 连接与上传（MINA SSHD）

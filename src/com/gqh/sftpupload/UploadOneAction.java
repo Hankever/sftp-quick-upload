@@ -57,10 +57,8 @@ public class UploadOneAction extends AnAction {
         return result == 1;
     }
 
-    @Override
-    public void update(@NotNull AnActionEvent e) {
-        VirtualFile[] files = SelectedFiles.of(e);
-        e.getPresentation().setEnabled(files != null && files.length > 0);
-    }
+    // 不覆写 update 去置灰：有些 IDEA 版本在项目树里给动态子菜单动作的 update
+    // 事件不带 VIRTUAL_FILE_ARRAY，会导致配置好的服务器整排变灰。
+    // 没有选中文件时 actionPerformed 会直接返回，这里保持可点击即可。
 
 }

@@ -8,6 +8,7 @@ import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBScrollPane;
+import com.intellij.ui.components.JBTextArea;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.FormBuilder;
 import org.jetbrains.annotations.Nullable;
@@ -16,12 +17,14 @@ import javax.swing.BoxLayout;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Window;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -50,6 +53,16 @@ public class SettingsDialog extends DialogWrapper {
     private final JBTextField mappingNameField = new JBTextField();
     private final JBTextField mappingLocalField = new JBTextField();
     private final JBTextField mappingRemoteField = new JBTextField();
+
+    private final JCheckBox postEnabledBox = new JCheckBox("上传成功后按规则调用接口（不勾选则完全不影响上传）");
+    private final JComboBox<String> postMethodBox = new JComboBox<>(new String[]{"GET", "POST"});
+    private final JBTextField postUrlField = new JBTextField();
+    private final JBTextArea postRulesArea = new JBTextArea(3, 30);
+    private final JBTextArea postHeadersArea = new JBTextArea(2, 30);
+    private final JBTextArea postBodyArea = new JBTextArea(2, 30);
+    private final JCheckBox postAskBox = new JCheckBox("调用前先询问（取消勾选则上传成功后直接调用）");
+
+    private JPanel postDetailPanel;
 
     private JBLabel legacyLabel;
     private JButton legacyImportButton;
@@ -138,6 +151,38 @@ public class SettingsDialog extends DialogWrapper {
         mappingButtons.add(button("新增映射", this::addMapping));
         mappingButtons.add(button("删除映射", this::removeMapping));
 
+        postUrlField.setToolTipText("完整 URL，可带 token，例如 http://主机/tss/sqlconfig/refresh?token=xxx");
+        postRulesArea.setToolTipText("每行一条规则，例如 *.xml、**/config/*.xml；"
+                + "* 不跨目录，** 跨目录；不含 / 的规则只匹配文件名；留空表示所有文件");
+        postHeadersArea.setToolTipText("每行一个请求头，格式 Name: value，可留空");
+        postBodyArea.setToolTipText("POST 请求体，可留空；GET 时忽略");
+        postBodyArea.setLineWrap(true);
+        postBodyArea.setWrapStyleWord(true);
+
+        JBScrollPane postRulesScroll = new JBScrollPane(postRulesArea);
+        postRulesScroll.setPreferredSize(new Dimension(430, 62));
+        JBScrollPane postHeadersScroll = new JBScrollPane(postHeadersArea);
+        postHeadersScroll.setPreferredSize(new Dimension(430, 44));
+        JBScrollPane postBodyScroll = new JBScrollPane(postBodyArea);
+        postBodyScroll.setPreferredSize(new Dimension(430, 44));
+
+        JPanel postUrlRow = new JPanel(new BorderLayout(6, 0));
+        postUrlRow.add(postMethodBox, BorderLayout.WEST);
+        postUrlRow.add(postUrlField, BorderLayout.CENTER);
+
+        // 只有勾选「上传成功后按规则调用接口」时才显示下面这些配置
+        postDetailPanel = FormBuilder.createFormBuilder()
+                .addLabeledComponent("接口：", postUrlRow)
+                .addLabeledComponent("命中规则：", postRulesScroll)
+                .addComponent(new JBLabel("<html><i>每行一条：*.xml、**/config/*.xml；"
+                        + "不含 / 只匹配文件名；<br>留空表示所有文件。</i></html>"))
+                .addLabeledComponent("请求头：", postHeadersScroll)
+                .addLabeledComponent("请求体：", postBodyScroll)
+                .addComponent(postAskBox)
+                .getPanel();
+        postDetailPanel.setVisible(false);
+        postEnabledBox.addActionListener(e -> updatePostDetailVisibility(true));
+
         JPanel right = FormBuilder.createFormBuilder()
                 .addLabeledComponent("名称：", nameField)
                 .addLabeledComponent("主机：", hostField)
@@ -153,6 +198,9 @@ public class SettingsDialog extends DialogWrapper {
                 .addLabeledComponent("远端目录：", mappingRemoteField)
                 .addComponent(new JBLabel("<html><i>本地目录相对项目根，例如 src/main/resources；"
                         + "远端目录填绝对路径，例如 /var/www/app/WEB-INF/classes</i></html>"))
+                .addComponent(new TitledSeparator("上传后调用接口"))
+                .addComponent(postEnabledBox)
+                .addComponent(postDetailPanel)
                 .addComponent(new JBLabel("<html><i>这些配置只对当前项目生效，保存在项目的 .idea 目录，"
                         + "不会和其他项目共用。</i></html>"))
                 .getPanel();
@@ -441,6 +489,20 @@ public class SettingsDialog extends DialogWrapper {
 
     // ---------------- 服务器表单 ----------------
 
+    /** 勾选「上传后调用接口」时才展开配置；对话框跟着内容伸缩。 */
+    private void updatePostDetailVisibility(boolean pack) {
+        if (postDetailPanel == null) {
+            return;
+        }
+        postDetailPanel.setVisible(postEnabledBox.isSelected());
+        if (pack) {
+            Window window = getWindow();
+            if (window != null && window.isShowing()) {
+                window.pack();
+            }
+        }
+    }
+
     private void loadServerForm() {
         loading = true;
         try {
@@ -456,6 +518,16 @@ public class SettingsDialog extends DialogWrapper {
             portField.setText(String.valueOf(s.getPort()));
             userField.setText(s.getUsername());
             productionBox.setSelected(s.isProduction());
+
+            PostUploadConfig post = s.getPostUpload();
+            postEnabledBox.setSelected(post.isEnabled());
+            postMethodBox.setSelectedItem(post.getMethod());
+            postUrlField.setText(post.getUrl());
+            postRulesArea.setText(post.getRules());
+            postHeadersArea.setText(post.getHeaders());
+            postBodyArea.setText(post.getBody());
+            postAskBox.setSelected(post.isAskBeforeCall());
+            updatePostDetailVisibility(false);
         } finally {
             loading = false;
         }
@@ -490,6 +562,14 @@ public class SettingsDialog extends DialogWrapper {
         portField.setText("22");
         userField.setText("");
         productionBox.setSelected(false);
+        postEnabledBox.setSelected(false);
+        postMethodBox.setSelectedItem("GET");
+        postUrlField.setText("");
+        postRulesArea.setText("");
+        postHeadersArea.setText("");
+        postBodyArea.setText("");
+        postAskBox.setSelected(true);
+        updatePostDetailVisibility(false);
     }
 
     private void flushServerForm() {
@@ -506,6 +586,16 @@ public class SettingsDialog extends DialogWrapper {
         }
         s.setUsername(userField.getText().trim());
         s.setProduction(productionBox.isSelected());
+
+        PostUploadConfig post = s.getPostUpload();
+        post.setEnabled(postEnabledBox.isSelected());
+        post.setMethod(String.valueOf(postMethodBox.getSelectedItem()));
+        post.setUrl(postUrlField.getText().trim());
+        post.setRules(postRulesArea.getText());
+        post.setHeaders(postHeadersArea.getText());
+        post.setBody(postBodyArea.getText());
+        post.setAskBeforeCall(postAskBox.isSelected());
+
         if (currentIndex < serverListModel.size()) {
             serverListModel.set(currentIndex, s.listText());
         }
@@ -580,6 +670,18 @@ public class SettingsDialog extends DialogWrapper {
             if (s.getMappings().isEmpty()) {
                 setErrorText("「" + s.getName() + "」至少要配置一条路径映射");
                 return;
+            }
+            PostUploadConfig post = s.getPostUpload();
+            if (post.isEnabled()) {
+                String url = post.getUrl().trim();
+                if (url.isEmpty()) {
+                    setErrorText("「" + s.getName() + "」启用了上传后调用接口，但接口地址为空");
+                    return;
+                }
+                if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                    setErrorText("「" + s.getName() + "」的接口地址要以 http:// 或 https:// 开头");
+                    return;
+                }
             }
             Set<String> locals = new HashSet<>();
             for (PathMapping m : s.getMappings()) {

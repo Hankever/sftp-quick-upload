@@ -43,6 +43,13 @@ final class SelectedFiles {
                 }
             }
         }
+        // 少数右键上下文只给单个文件（没有数组，也没有 CHANGES），兜底一下
+        if (result.isEmpty()) {
+            VirtualFile single = e.getData(CommonDataKeys.VIRTUAL_FILE);
+            if (single != null) {
+                result.add(single);
+            }
+        }
         return result.isEmpty() ? VirtualFile.EMPTY_ARRAY : result.toArray(VirtualFile.EMPTY_ARRAY);
     }
 }
